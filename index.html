@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pinterest Moodboard</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; height: 100vh; overflow: hidden; }
+
+#toolbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 52px;
+  background: white; border-bottom: 1px solid #e0e0e0;
+  display: flex; align-items: center; gap: 10px; padding: 0 16px; z-index: 1000;
+}
+#toolbar input[type="text"] {
+  flex: 1; max-width: 380px; height: 34px;
+  border: 1px solid #ddd; border-radius: 6px; padding: 0 12px; font-size: 13px; outline: none;
+}
+#toolbar input[type="text"]:focus { border-color: #e60023; }
+#toolbar button {
+  height: 34px; padding: 0 14px; background: #e60023; color: white;
+  border: none; border-radius: 6px; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+#toolbar button:hover { background: #c0001d; }
+#toolbar button:disabled { background: #ccc; cursor: default; }
+#btn-clear { background: white; color: #333; border: 1px solid #ddd; }
+#btn-clear:hover { background: #f5f5f5; }
+#btn-export { background: #222; }
+#btn-export:hover { background: #000; }
+#auto-label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #555; cursor: pointer; white-space: nowrap; }
+#auto-label input { accent-color: #e60023; }
+#next-update { font-size: 11px; color: #aaa; white-space: nowrap; }
+#status { font-size: 12px; color: #888; min-width: 100px; }
+#save-indicator { font-size: 11px; color: #aaa; white-space: nowrap; }
+
+#toolpanel {
+  position: fixed; top: 62px; left: 10px;
+  background: white; border: 1px solid #e0e0e0; border-radius: 10px;
+  padding: 8px 6px; display: flex; flex-direction: column; gap: 2px;
+  z-index: 900; box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+.tool-btn {
+  width: 38px; height: 38px; border: none; background: transparent;
+  border-radius: 8px; cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 18px; color: #555; position: relative;
+}
+.tool-btn:hover { background: #f0f0f0; }
+.tool-btn.active { background: #ffe8eb; color: #e60023; }
+.tool-btn[title]:hover::after {
+  content: attr(title); position: absolute; left: 46px; top: 50%; transform: translateY(-50%);
+  background: #333; color: white; font-size: 11px; white-space: nowrap;
+  padding: 4px 8px; border-radius: 4px; pointer-events: none; z-index: 999;
+}
+#tool-divider { height: 1px; background: #eee; margin: 4px 0; }
+#shape-controls { display: flex; flex-direction: column; gap: 6px; padding: 6px 4px 2px; }
+.ctrl-row { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.ctrl-label { font-size: 9px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+input[type="color"] { width: 28px; height: 24px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; padding: 1px; }
+input[type="range"].stroke-range { width: 26px; writing-mode: vertical-lr; direction: rtl; height: 50px; cursor: pointer; accent-color: #e60023; }
+
+#canvas { position: absolute; top: 52px; left: 0; right: 0; bottom: 0; overflow: hidden; }
+#canvas.tool-shape { cursor: crosshair; }
+#canvas.tool-text  { cursor: text; }
+
+#board { position: absolute; width: 6000px; height: 6000px; transform-origin: 0 0; }
+
+.pin { position: absolute; cursor: grab; user-select: none; border-radius: 6px; overflow: hidden; background: #eee; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.pin:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.2); z-index: 100; }
+.pin.dragging { cursor: grabbing; box-shadow: 0 12px 32px rgba(0,0,0,0.25); z-index: 999; }
+.pin img { display: block; width: 100%; pointer-events: none; }
+.pin-handle { position: absolute; bottom: 0; right: 0; width: 18px; height: 18px; cursor: se-resize; opacity: 0; }
+.pin:hover .pin-handle { opacity: 1; }
+.pin-handle::after { content: ''; position: absolute; bottom: 4px; right: 4px; width: 8px; height: 8px; border-right: 2px solid rgba(0,0,0,0.5); border-bottom: 2px solid rgba(0,0,0,0.5); }
+
+.shape { position: absolute; cursor: grab; user-select: none; }
+.shape.dragging { cursor: grabbing; z-index: 999; }
+.shape.selected { outline: 2px solid #e60023; outline-offset: 2px; }
+.shape-rect, .shape-circle { min-width: 20px; min-height: 20px; }
+.shape-circle { border-radius: 50%; }
+.shape-text { min-width: 60px; min-height: 28px; padding: 4px 6px; font-size: 18px; background: transparent; border: none; outline: none; cursor: text; white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+.shape-text:empty::before { content: attr(data-placeholder); color: #bbb; }
+.sh-handle { position: absolute; width: 9px; height: 9px; background: white; border: 2px solid #e60023; border-radius: 2px; z-index: 10; display: none; }
+.shape.selected .sh-handle { display: block; }
+.sh-se { bottom: -5px; right: -5px; cursor: se-resize; }
+.sh-sw { bottom: -5px; left: -5px; cursor: sw-resize; }
+.sh-ne { top: -5px; right: -5px; cursor: ne-resize; }
+.sh-nw { top: -5px; left: -5px; cursor: nw-resize; }
+.shape-line-wrap { position: absolute; overflow: visible; pointer-events: none; top: 0; left: 0; }
+.shape-line-wrap svg { overflow: visible; }
+
+#drop-overlay {
+  display: none; position: absolute; inset: 0;
+  background: rgba(230,0,35,0.07); border: 2px dashed #e60023;
+  z-index: 200; align-items: center; justify-content: center;
+  font-size: 16px; color: #e60023; pointer-events: none;
+}
+#canvas.dragover #drop-overlay { display: flex; }
+
+#empty-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: #ccc; pointer-events: none; line-height: 1.6; }
+#empty-hint .icon { font-size: 48px; margin-bottom: 12px; }
+#empty-hint .main { font-size: 15px; color: #bbb; }
+#empty-hint .sub  { font-size: 12px; color: #ccc; margin-top: 6px; }
+
+#loading-overlay {
+  display: none; position: fixed; top: 52px; left: 0; right: 0; bottom: 0;
+  background: rgba(245,245,240,0.85); z-index: 500;
+  flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+}
+#loading-overlay.visible { display: flex; }
+.spinner { width: 36px; height: 36px; border: 3px solid #e0e0e0; border-top-color: #e60023; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-text { font-size: 13px; color: #999; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <input type="text" id="url-input" placeholder="https://www.pinterest.com/username/board-name/" />
+  <button id="btn-load">불러오기</button>
+  <button id="btn-clear">초기화</button>
+  <button id="btn-export">PNG 저장</button>
+  <label id="auto-label"><input type="checkbox" id="btn-auto">자동 업데이트</label>
+  <span id="next-update"></span>
+  <span id="status"></span>
+  <span id="save-indicator"></span>
+</div>
+
+<div id="toolpanel">
+  <button class="tool-btn active" id="t-select" title="선택 (V)">↖</button>
+  <button class="tool-btn" id="t-rect"   title="사각형 (R)"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="2" y="2" width="14" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+  <button class="tool-btn" id="t-circle" title="원 (C)"><svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+  <button class="tool-btn" id="t-line"   title="선 (L)"><svg width="18" height="18" viewBox="0 0 18 18"><line x1="2" y1="16" x2="16" y2="2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  <button class="tool-btn" id="t-text"   title="텍스트 (T)" style="font-size:16px;font-weight:600;">T</button>
+  <div id="tool-divider"></div>
+  <div id="shape-controls">
+    <div class="ctrl-row"><span class="ctrl-label">채움</span><input type="color" id="ctrl-fill" value="#ffffff"></div>
+    <div class="ctrl-row"><span class="ctrl-label">선</span><input type="color" id="ctrl-stroke" value="#222222"></div>
+    <div class="ctrl-row"><span class="ctrl-label">굵기</span><input type="range" class="stroke-range" id="ctrl-sw" min="1" max="20" value="2"></div>
+  </div>
+</div>
+
+<div id="canvas">
+  <div id="board">
+    <div id="empty-hint">
+      <div class="icon">📌</div>
+      <div class="main">Pinterest 보드 URL을 입력하고 불러오기 클릭</div>
+      <div class="sub">또는 이미지 파일을 여기에 드래그앤드롭</div>
+    </div>
+  </div>
+  <div id="drop-overlay">이미지를 놓으면 추가돼</div>
+</div>
+
+<div id="loading-overlay"><div class="spinner"></div><p id="loading-text">로딩 중...</p></div>
+
+<script>
+// ── 설정: Cloudflare Worker URL ────────────────────────
+// 로컬 개발: 'http://127.0.0.1:8765/proxy'
+// GitHub Pages: 'https://your-worker.your-name.workers.dev/proxy'  ← 배포 후 교체
+const PROXY_BASE = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+  ? 'http://127.0.0.1:8765/proxy'
+  : 'https://YOUR_WORKER_URL.workers.dev/proxy'; // ← 여기 교체
+
+// ── 상태 ──────────────────────────────────────────────
+let scale = 1, panX = 0, panY = 0;
+let isPanning = false, panStart = { x:0, y:0 };
+let knownUrls = new Set();
+let autoTimer = null, countdownTimer = null;
+const AUTO_INTERVAL = 90;
+
+let activeTool = 'select';
+let selectedShape = null;
+let isDrawing = false, drawStart = {x:0,y:0}, drawEl = null;
+let saveTimer = null;
+
+const board    = document.getElementById('board');
+const canvasEl = document.getElementById('canvas');
+const statusEl = document.getElementById('status');
+const saveEl   = document.getElementById('save-indicator');
+const loadingOverlay = document.getElementById('loading-overlay');
+const loadingText    = document.getElementById('loading-text');
+
+// ── IndexedDB (로컬 이미지 저장) ──────────────────────
+let db = null;
+function openDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('moodboard', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('images', { autoIncrement: true });
+    req.onsuccess = e => { db = e.target.result; res(db); };
+    req.onerror = () => rej(req.error);
+  });
+}
+function dbSave(blob) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction('images', 'readwrite');
+    const req = tx.objectStore('images').add(blob);
+    req.onsuccess = () => res(req.result); // returns key
+    req.onerror   = () => rej(req.error);
+  });
+}
+function dbGet(key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction('images', 'readonly');
+    const req = tx.objectStore('images').get(key);
+    req.onsuccess = () => res(req.result);
+    req.onerror   = () => rej(req.error);
+  });
+}
+function dbClear() {
+  const tx = db.transaction('images', 'readwrite');
+  tx.objectStore('images').clear();
+}
+
+// ── 자동저장 ──────────────────────────────────────────
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveBoard, 600);
+}
+
+function saveBoard() {
+  const pins = [], localPins = [];
+  board.querySelectorAll('.pin').forEach(pin => {
+    const d = { x: parseFloat(pin.style.left), y: parseFloat(pin.style.top), w: parseFloat(pin.style.width) };
+    if (pin.dataset.localId) localPins.push({ ...d, id: parseInt(pin.dataset.localId) });
+    else pins.push({ ...d, src: pin.querySelector('img').src });
+  });
+
+  const shapes = [];
+  board.querySelectorAll('.shape').forEach(el => {
+    if (el.classList.contains('shape-rect') || el.classList.contains('shape-circle')) {
+      const type = el.classList.contains('shape-rect') ? 'rect' : 'circle';
+      const border = el.style.border || '';
+      const swMatch = border.match(/^(\d+)px/);
+      shapes.push({
+        type,
+        x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+        w: parseFloat(el.style.width), h: parseFloat(el.style.height),
+        fill: el.style.background || el.style.backgroundColor || '#ffffff',
+        stroke: el.dataset.stroke || '#222222',
+        sw: el.dataset.sw || '2',
+      });
+    } else if (el.classList.contains('shape-text')) {
+      shapes.push({
+        type: 'text',
+        x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+        text: el.innerText,
+        color: el.style.color || '#222222',
+        fontSize: parseFloat(el.style.fontSize) || 20,
+      });
+    } else if (el.classList.contains('shape-line-wrap')) {
+      const line = el.querySelector('line');
+      if (line) shapes.push({
+        type: 'line',
+        x1: parseFloat(line.getAttribute('x1')), y1: parseFloat(line.getAttribute('y1')),
+        x2: parseFloat(line.getAttribute('x2')), y2: parseFloat(line.getAttribute('y2')),
+        stroke: line.getAttribute('stroke') || '#222222',
+        sw: parseFloat(line.getAttribute('stroke-width')) || 2,
+      });
+    }
+  });
+
+  const data = {
+    v: 2,
+    boardUrl: document.getElementById('url-input').value,
+    knownUrls: [...knownUrls],
+    viewport: { panX, panY, scale },
+    pins, localPins, shapes,
+    savedAt: Date.now(),
+  };
+  try {
+    localStorage.setItem('moodboard-v2', JSON.stringify(data));
+    const t = new Date(data.savedAt);
+    saveEl.textContent = `저장됨 ${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`;
+  } catch(e) {
+    saveEl.textContent = '저장 실패 (용량 초과)';
+  }
+}
+
+async function loadSaved() {
+  const raw = localStorage.getItem('moodboard-v2');
+  if (!raw) return false;
+  let data;
+  try { data = JSON.parse(raw); } catch { return false; }
+  if (!data.v) return false;
+
+  document.getElementById('url-input').value = data.boardUrl || '';
+  knownUrls = new Set(data.knownUrls || []);
+  clearBoard(false);
+
+  // URL 핀 복원
+  (data.pins || []).forEach(p => createPin(p.src, p.x, p.y, p.w));
+
+  // 로컬 이미지 복원 (IndexedDB)
+  for (const p of (data.localPins || [])) {
+    try {
+      const blob = await dbGet(p.id);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        createPin(url, p.x, p.y, p.w, p.id);
+      }
+    } catch {}
+  }
+
+  // 도형 복원
+  (data.shapes || []).forEach(s => restoreShape(s));
+
+  // 뷰포트 복원
+  if (data.viewport) { panX = data.viewport.panX; panY = data.viewport.panY; scale = data.viewport.scale; applyTransform(); }
+
+  if (board.querySelector('.pin, .shape')) hideHint();
+
+  const t = new Date(data.savedAt);
+  saveEl.textContent = `복원됨 ${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`;
+  return true;
+}
+
+function restoreShape(s) {
+  if (s.type === 'rect' || s.type === 'circle') {
+    const el = document.createElement('div');
+    el.className = 'shape ' + (s.type === 'rect' ? 'shape-rect' : 'shape-circle');
+    el.style.cssText = `left:${s.x}px;top:${s.y}px;width:${s.w}px;height:${s.h}px;background:${s.fill};border:${s.sw}px solid ${s.stroke};`;
+    el.dataset.stroke = s.stroke; el.dataset.sw = s.sw;
+    finalizeShape(el);
+  } else if (s.type === 'line') {
+    createLineShape(s.x1, s.y1, s.x2, s.y2, s.stroke, s.sw);
+  } else if (s.type === 'text') {
+    const el = createTextShape(s.x, s.y, s.color, s.fontSize);
+    el.innerText = s.text || '';
+  }
+}
+
+// ── 좌표 변환 ──────────────────────────────────────────
+function applyTransform() {
+  board.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
+}
+function toBoard(cx, cy) {
+  const r = canvasEl.getBoundingClientRect();
+  return { x: (cx - r.left - panX) / scale, y: (cy - r.top - panY) / scale };
+}
+
+// ── 툴 선택 ───────────────────────────────────────────
+function setTool(tool) {
+  activeTool = tool;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('t-' + tool)?.classList.add('active');
+  canvasEl.className = tool === 'select' ? '' : tool === 'text' ? 'tool-text' : 'tool-shape';
+  if (tool !== 'select') deselectShape();
+}
+['select','rect','circle','line','text'].forEach(t =>
+  document.getElementById('t-' + t).addEventListener('click', () => setTool(t))
+);
+document.addEventListener('keydown', e => {
+  if (e.target.classList.contains('shape-text')) return;
+  const map = { v:'select', r:'rect', c:'circle', l:'line', t:'text' };
+  if (map[e.key.toLowerCase()]) setTool(map[e.key.toLowerCase()]);
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShape && document.activeElement !== selectedShape) {
+    selectedShape.remove(); selectedShape = null; scheduleSave();
+  }
+  if (e.key === 'Escape') { deselectShape(); setTool('select'); }
+});
+
+function getFill()   { return document.getElementById('ctrl-fill').value; }
+function getStroke() { return document.getElementById('ctrl-stroke').value; }
+function getSW()     { return parseInt(document.getElementById('ctrl-sw').value); }
+
+// ── 도형 선택 ─────────────────────────────────────────
+function selectShape(el) { deselectShape(); selectedShape = el; el.classList.add('selected'); }
+function deselectShape()  { if (selectedShape) { selectedShape.classList.remove('selected'); selectedShape = null; } }
+
+// ── 휠 확대/축소 ───────────────────────────────────────
+canvasEl.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = canvasEl.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const f = e.deltaY < 0 ? 1.1 : 0.9;
+  const ns = Math.min(3, Math.max(0.1, scale * f));
+  panX = mx - (mx - panX) * (ns / scale);
+  panY = my - (my - panY) * (ns / scale);
+  scale = ns; applyTransform();
+}, { passive: false });
+
+// ── 캔버스 mousedown ──────────────────────────────────
+canvasEl.addEventListener('mousedown', e => {
+  if (e.target.closest('#toolpanel')) return;
+  const onBoard = e.target === canvasEl || e.target === board || e.target.closest('#empty-hint');
+
+  if (activeTool !== 'select' && activeTool !== 'text' && onBoard) {
+    const p = toBoard(e.clientX, e.clientY);
+    isDrawing = true; drawStart = p;
+    if (activeTool === 'line') {
+      drawEl = document.createElementNS('http://www.w3.org/2000/svg','line');
+      drawEl.setAttribute('x1', p.x); drawEl.setAttribute('y1', p.y);
+      drawEl.setAttribute('x2', p.x); drawEl.setAttribute('y2', p.y);
+      drawEl.setAttribute('stroke', getStroke()); drawEl.setAttribute('stroke-width', getSW());
+      drawEl.setAttribute('stroke-linecap','round');
+      let svg = board.querySelector('#line-preview-svg');
+      if (!svg) { svg = document.createElementNS('http://www.w3.org/2000/svg','svg'); svg.id='line-preview-svg'; svg.style.cssText='position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none;z-index:800;'; board.appendChild(svg); }
+      svg.appendChild(drawEl);
+    } else {
+      drawEl = document.createElement('div');
+      drawEl.className = 'shape ' + (activeTool === 'rect' ? 'shape-rect' : 'shape-circle');
+      drawEl.style.cssText = `left:${p.x}px;top:${p.y}px;width:0;height:0;background:${getFill()};border:${getSW()}px solid ${getStroke()};pointer-events:none;`;
+      drawEl.dataset.stroke = getStroke(); drawEl.dataset.sw = getSW();
+      board.appendChild(drawEl);
+    }
+    return;
+  }
+
+  if (activeTool === 'text' && onBoard) {
+    const p = toBoard(e.clientX, e.clientY);
+    const el = createTextShape(p.x, p.y, getStroke(), 20);
+    el.focus(); setTool('select'); return;
+  }
+
+  if (activeTool === 'select' && onBoard) {
+    isPanning = true;
+    panStart = { x: e.clientX - panX, y: e.clientY - panY };
+    canvasEl.style.cursor = 'grabbing';
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (isPanning) { panX = e.clientX - panStart.x; panY = e.clientY - panStart.y; applyTransform(); return; }
+  if (!isDrawing || !drawEl) return;
+  const p = toBoard(e.clientX, e.clientY);
+  if (activeTool === 'line') {
+    drawEl.setAttribute('x2', p.x); drawEl.setAttribute('y2', p.y);
+  } else {
+    const x = Math.min(p.x, drawStart.x), y = Math.min(p.y, drawStart.y);
+    drawEl.style.left = x+'px'; drawEl.style.top = y+'px';
+    drawEl.style.width = Math.abs(p.x-drawStart.x)+'px';
+    drawEl.style.height = Math.abs(p.y-drawStart.y)+'px';
+  }
+});
+
+window.addEventListener('mouseup', e => {
+  canvasEl.style.cursor = '';
+  if (isPanning) { isPanning = false; scheduleSave(); return; }
+  if (!isDrawing) return;
+  isDrawing = false;
+  const p = toBoard(e.clientX, e.clientY);
+
+  if (activeTool === 'line') {
+    const svg = board.querySelector('#line-preview-svg');
+    if (svg && drawEl) svg.removeChild(drawEl);
+    const dx = p.x-drawStart.x, dy = p.y-drawStart.y;
+    if (Math.hypot(dx,dy) > 5) { createLineShape(drawStart.x,drawStart.y,p.x,p.y,getStroke(),getSW()); hideHint(); scheduleSave(); }
+  } else {
+    const w = parseFloat(drawEl.style.width), h = parseFloat(drawEl.style.height);
+    if (w < 5 || h < 5) { drawEl.remove(); }
+    else { drawEl.style.pointerEvents=''; finalizeShape(drawEl); hideHint(); scheduleSave(); }
+  }
+  drawEl = null;
+});
+
+// ── 도형 공통 ─────────────────────────────────────────
+function finalizeShape(el) {
+  addResizeHandles(el);
+  makeShapeDraggable(el);
+  el.addEventListener('mousedown', ev => { if (activeTool==='select') { ev.stopPropagation(); selectShape(el); } });
+  el.addEventListener('dblclick', () => { el.remove(); scheduleSave(); });
+  selectShape(el);
+  board.appendChild(el);
+}
+
+function makeShapeDraggable(el) {
+  let dragging=false, ox=0, oy=0;
+  el.addEventListener('mousedown', e => {
+    if (activeTool!=='select'||e.target.classList.contains('sh-handle')) return;
+    e.stopPropagation(); dragging=true;
+    ox=(e.clientX-panX)/scale-parseFloat(el.style.left||0);
+    oy=(e.clientY-panY)/scale-parseFloat(el.style.top||0);
+    el.classList.add('dragging');
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    el.style.left=((e.clientX-panX)/scale-ox)+'px';
+    el.style.top =((e.clientY-panY)/scale-oy)+'px';
+  });
+  window.addEventListener('mouseup', () => { if(dragging){dragging=false;el.classList.remove('dragging');scheduleSave();} });
+}
+
+function addResizeHandles(el) {
+  [['sh-se','se'],['sh-sw','sw'],['sh-ne','ne'],['sh-nw','nw']].forEach(([cls,dir]) => {
+    const h = document.createElement('div');
+    h.className = 'sh-handle ' + cls;
+    h.addEventListener('mousedown', e => {
+      e.stopPropagation();
+      const sx=e.clientX, sy=e.clientY;
+      const oL=parseFloat(el.style.left), oT=parseFloat(el.style.top), oW=parseFloat(el.style.width), oH=parseFloat(el.style.height);
+      function mv(ev) {
+        const dx=(ev.clientX-sx)/scale, dy=(ev.clientY-sy)/scale;
+        if(dir.includes('e')) el.style.width =Math.max(20,oW+dx)+'px';
+        if(dir.includes('s')) el.style.height=Math.max(20,oH+dy)+'px';
+        if(dir.includes('w')){el.style.left=(oL+dx)+'px';el.style.width =Math.max(20,oW-dx)+'px';}
+        if(dir.includes('n')){el.style.top =(oT+dy)+'px';el.style.height=Math.max(20,oH-dy)+'px';}
+      }
+      function up(){window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up);scheduleSave();}
+      window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up);
+    });
+    el.appendChild(h);
+  });
+}
+
+// ── 선 도형 ───────────────────────────────────────────
+function createLineShape(x1,y1,x2,y2, strokeColor, sw) {
+  strokeColor = strokeColor || getStroke(); sw = sw || getSW();
+  const wrap = document.createElement('div');
+  wrap.className = 'shape shape-line-wrap';
+  wrap.style.cssText = 'left:0;top:0;width:0;height:0;';
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;';
+  const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+  line.setAttribute('x1',x1);line.setAttribute('y1',y1);
+  line.setAttribute('x2',x2);line.setAttribute('y2',y2);
+  line.setAttribute('stroke',strokeColor);line.setAttribute('stroke-width',sw);
+  line.setAttribute('stroke-linecap','round');line.style.pointerEvents='stroke';
+
+  const c1 = makeLineHandle(x1,y1,(nx,ny)=>{line.setAttribute('x1',nx);line.setAttribute('y1',ny);c1.style.left=(nx-6)+'px';c1.style.top=(ny-6)+'px';});
+  const c2 = makeLineHandle(x2,y2,(nx,ny)=>{line.setAttribute('x2',nx);line.setAttribute('y2',ny);c2.style.left=(nx-6)+'px';c2.style.top=(ny-6)+'px';});
+
+  let drag=false,ox1,oy1,ox2,oy2,smx,smy;
+  line.addEventListener('mousedown',e=>{
+    if(activeTool!=='select') return;
+    e.stopPropagation(); selectShape(wrap); drag=true;
+    ox1=parseFloat(line.getAttribute('x1'));oy1=parseFloat(line.getAttribute('y1'));
+    ox2=parseFloat(line.getAttribute('x2'));oy2=parseFloat(line.getAttribute('y2'));
+    smx=e.clientX; smy=e.clientY;
+  });
+  window.addEventListener('mousemove',e=>{
+    if(!drag) return;
+    const dx=(e.clientX-smx)/scale,dy=(e.clientY-smy)/scale;
+    line.setAttribute('x1',ox1+dx);line.setAttribute('y1',oy1+dy);
+    line.setAttribute('x2',ox2+dx);line.setAttribute('y2',oy2+dy);
+    c1.style.left=(ox1+dx-6)+'px';c1.style.top=(oy1+dy-6)+'px';
+    c2.style.left=(ox2+dx-6)+'px';c2.style.top=(oy2+dy-6)+'px';
+  });
+  window.addEventListener('mouseup',()=>{if(drag){drag=false;scheduleSave();}});
+
+  wrap.addEventListener('mousedown',e=>{if(activeTool==='select'){e.stopPropagation();selectShape(wrap);}});
+  wrap.addEventListener('dblclick',()=>{wrap.remove();scheduleSave();});
+
+  svg.appendChild(line); wrap.appendChild(svg); wrap.appendChild(c1); wrap.appendChild(c2);
+  board.appendChild(wrap); selectShape(wrap);
+}
+
+function makeLineHandle(x, y, onMove) {
+  const h = document.createElement('div');
+  h.className = 'sh-handle'; h.style.cssText=`left:${x-6}px;top:${y-6}px;cursor:move;display:block;border-color:#555;`;
+  let drag=false,sx,sy;
+  h.addEventListener('mousedown',e=>{e.stopPropagation();drag=true;sx=e.clientX;sy=e.clientY;});
+  window.addEventListener('mousemove',e=>{
+    if(!drag) return;
+    const nx=x+(e.clientX-sx)/scale,ny=y+(e.clientY-sy)/scale;
+    onMove(nx,ny); x=nx;y=ny;sx=e.clientX;sy=e.clientY;
+  });
+  window.addEventListener('mouseup',()=>{if(drag){drag=false;scheduleSave();}});
+  return h;
+}
+
+// ── 텍스트 도형 ───────────────────────────────────────
+function createTextShape(x, y, color, fontSize) {
+  color = color || getStroke(); fontSize = fontSize || 20;
+  const el = document.createElement('div');
+  el.className = 'shape shape-text';
+  el.contentEditable = 'true';
+  el.setAttribute('data-placeholder','텍스트 입력…');
+  el.style.cssText = `left:${x}px;top:${y}px;color:${color};font-size:${fontSize}px;`;
+  el.addEventListener('mousedown',e=>{if(activeTool==='select'){e.stopPropagation();selectShape(el);}});
+  el.addEventListener('input', scheduleSave);
+  el.addEventListener('blur',()=>{if(!el.textContent.trim())el.remove();else scheduleSave();});
+  el.addEventListener('dblclick',e=>{e.stopPropagation();el.contentEditable='true';el.focus();});
+  makeShapeDraggable(el);
+  board.appendChild(el); hideHint(); return el;
+}
+
+// ── 핀 (이미지) ───────────────────────────────────────
+function createPin(src, x, y, w=220, localId=null) {
+  const pin = document.createElement('div');
+  pin.className = 'pin';
+  pin.style.cssText = `left:${x}px;top:${y}px;width:${w}px`;
+  if (localId) pin.dataset.localId = localId;
+
+  const img = document.createElement('img');
+  img.src=src; img.draggable=false; img.loading='lazy';
+  img.onerror=()=>pin.remove();
+  pin.appendChild(img);
+
+  const handle = document.createElement('div');
+  handle.className='pin-handle'; pin.appendChild(handle);
+
+  let drag=false,ox=0,oy=0;
+  pin.addEventListener('mousedown',e=>{
+    if(activeTool!=='select'||e.target===handle) return;
+    e.stopPropagation(); drag=true;
+    ox=(e.clientX-panX)/scale-parseInt(pin.style.left);
+    oy=(e.clientY-panY)/scale-parseInt(pin.style.top);
+    pin.classList.add('dragging'); deselectShape();
+  });
+  window.addEventListener('mousemove',e=>{
+    if(!drag) return;
+    pin.style.left=((e.clientX-panX)/scale-ox)+'px';
+    pin.style.top =((e.clientY-panY)/scale-oy)+'px';
+  });
+  window.addEventListener('mouseup',()=>{if(drag){drag=false;pin.classList.remove('dragging');scheduleSave();}});
+
+  let resizing=false,startW=0,startMX=0;
+  handle.addEventListener('mousedown',e=>{e.stopPropagation();resizing=true;startW=parseInt(pin.style.width);startMX=e.clientX;});
+  window.addEventListener('mousemove',e=>{if(!resizing) return;pin.style.width=Math.max(60,startW+(e.clientX-startMX)/scale)+'px';});
+  window.addEventListener('mouseup',()=>{if(resizing){resizing=false;scheduleSave();}});
+
+  pin.addEventListener('dblclick',()=>{pin.remove();scheduleSave();});
+  board.appendChild(pin); return pin;
+}
+
+// ── RSS ───────────────────────────────────────────────
+function parseRssXml(text) {
+  const xml = new DOMParser().parseFromString(text,'text/xml');
+  if (xml.querySelector('parsererror')) throw new Error('RSS 파싱 실패');
+  const items = xml.querySelectorAll('item');
+  if (!items.length) throw new Error('핀을 찾을 수 없어. 보드가 공개인지 확인해줘.');
+  const results = [];
+  for (const item of items) {
+    let url=null;
+    const media=item.querySelector('content');
+    if(media?.getAttribute('url')) url=media.getAttribute('url');
+    if(!url){const m=(item.querySelector('description')?.textContent||'').match(/<img[^>]+src=["']([^"']+)["']/i);if(m)url=m[1];}
+    if(!url){const enc=item.querySelector('enclosure');if(enc?.getAttribute('url'))url=enc.getAttribute('url');}
+    if(url) results.push(url.replace(/\/\d+x\//,'/736x/'));
+  }
+  return results;
+}
+
+async function fetchPinUrls(rssUrl) {
+  const res = await fetch(`${PROXY_BASE}?url=${encodeURIComponent(rssUrl)}`,{signal:AbortSignal.timeout(10000)});
+  if(!res.ok) throw new Error(`프록시 오류 HTTP ${res.status}`);
+  return parseRssXml(await res.text());
+}
+
+// ── 자동 업데이트 ─────────────────────────────────────
+function startCountdown() {
+  const el=document.getElementById('next-update'); let rem=AUTO_INTERVAL;
+  clearInterval(countdownTimer);
+  countdownTimer=setInterval(()=>{rem--;if(rem<=0){el.textContent='업데이트 중…';clearInterval(countdownTimer);}else el.textContent=`${rem}초 후 업데이트`;},1000);
+}
+function stopCountdown(){clearInterval(countdownTimer);document.getElementById('next-update').textContent='';}
+
+async function refreshBoard() {
+  const rssUrl=buildRssUrl(); if(!rssUrl) return;
+  try {
+    const urls=await fetchPinUrls(rssUrl);
+    const newUrls=urls.filter(u=>!knownUrls.has(u));
+    if(newUrls.length){newUrls.forEach((src,i)=>{knownUrls.add(src);createPin(src,40+i*240,40);});statusEl.textContent=`+${newUrls.length}개 추가됨`;hideHint();scheduleSave();}
+    else statusEl.textContent='새 핀 없음';
+  }catch{statusEl.textContent='업데이트 실패';}
+  if(document.getElementById('btn-auto').checked){startCountdown();autoTimer=setTimeout(refreshBoard,AUTO_INTERVAL*1000);}
+}
+
+function buildRssUrl(){
+  const raw=document.getElementById('url-input').value.trim(); if(!raw)return null;
+  return (raw.startsWith('http')?raw:'https://'+raw).replace(/\/$/,'')+'.rss';
+}
+function startAutoUpdate(){clearTimeout(autoTimer);startCountdown();autoTimer=setTimeout(refreshBoard,AUTO_INTERVAL*1000);}
+function stopAutoUpdate(){clearTimeout(autoTimer);stopCountdown();}
+
+async function loadBoard() {
+  const rssUrl=buildRssUrl(); if(!rssUrl) return;
+  document.getElementById('btn-load').disabled=true;
+  loadingOverlay.classList.add('visible'); loadingText.textContent='RSS 피드 가져오는 중…';
+  statusEl.textContent=''; stopAutoUpdate();
+  try {
+    const urls=await fetchPinUrls(rssUrl);
+    loadingText.textContent=`${urls.length}개 핀 배치 중…`;
+    clearBoard(false); knownUrls.clear();
+    const COLS=5,CW=220,GAP=20;
+    urls.forEach((src,i)=>{knownUrls.add(src);createPin(src,40+(i%COLS)*(CW+GAP),40+Math.floor(i/COLS)*(CW*1.35+GAP),CW);});
+    hideHint(); statusEl.textContent=`핀 ${urls.length}개 로드됨`;
+    panX=0;panY=0;scale=1;applyTransform();
+    if(document.getElementById('btn-auto').checked){startCountdown();autoTimer=setTimeout(refreshBoard,AUTO_INTERVAL*1000);}
+    scheduleSave();
+  }catch(err){statusEl.textContent='오류: '+err.message;}
+  finally{document.getElementById('btn-load').disabled=false;loadingOverlay.classList.remove('visible');}
+}
+
+function clearBoard(resetKnown=true) {
+  board.querySelectorAll('.pin,.shape').forEach(p=>p.remove());
+  document.getElementById('empty-hint').style.display='';
+  statusEl.textContent='';
+  if(resetKnown){knownUrls.clear();dbClear();}
+}
+function hideHint(){document.getElementById('empty-hint').style.display='none';}
+
+// ── PNG 내보내기 ───────────────────────────────────────
+async function exportPNG(){
+  if(!board.querySelector('.pin,.shape')) return;
+  statusEl.textContent='PNG 생성 중…';
+  if(!window.html2canvas){
+    await new Promise((r,j)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=r;s.onerror=j;document.head.appendChild(s);});
+  }
+  const c=await html2canvas(board,{backgroundColor:'#f5f5f0',useCORS:true,allowTaint:true,scale:1});
+  const a=document.createElement('a');a.download='moodboard.png';a.href=c.toDataURL('image/png');a.click();
+  statusEl.textContent='저장 완료';
+}
+
+// ── 파일 드래그앤드롭 ─────────────────────────────────
+canvasEl.addEventListener('dragover',e=>{e.preventDefault();canvasEl.classList.add('dragover');});
+canvasEl.addEventListener('dragleave',e=>{if(!canvasEl.contains(e.relatedTarget))canvasEl.classList.remove('dragover');});
+canvasEl.addEventListener('drop',async e=>{
+  e.preventDefault(); canvasEl.classList.remove('dragover');
+  const p=toBoard(e.clientX,e.clientY);
+  const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));
+  if(!files.length) return;
+  for(let i=0;i<files.length;i++){
+    const file=files[i];
+    const blob=new Blob([await file.arrayBuffer()],{type:file.type});
+    const localId=await dbSave(blob);
+    const url=URL.createObjectURL(blob);
+    createPin(url,p.x-110+i*20,p.y-80+i*20,220,localId);
+    hideHint();
+  }
+  statusEl.textContent=`이미지 ${files.length}개 추가됨`;
+  scheduleSave();
+});
+
+// ── 빈 영역 클릭 → 선택 해제 ─────────────────────────
+canvasEl.addEventListener('click',e=>{
+  if(e.target===canvasEl||e.target===board) deselectShape();
+});
+
+// ── 이벤트 바인딩 ─────────────────────────────────────
+document.getElementById('btn-load').addEventListener('click',loadBoard);
+document.getElementById('url-input').addEventListener('keydown',e=>{if(e.key==='Enter')loadBoard();});
+document.getElementById('btn-clear').addEventListener('click',()=>{
+  stopAutoUpdate(); document.getElementById('btn-auto').checked=false;
+  clearBoard(true); deselectShape();
+  localStorage.removeItem('moodboard-v2'); saveEl.textContent='';
+});
+document.getElementById('btn-export').addEventListener('click',exportPNG);
+document.getElementById('btn-auto').addEventListener('change',e=>{
+  if(e.target.checked){if(knownUrls.size)startAutoUpdate();else{statusEl.textContent='먼저 보드를 불러와줘';e.target.checked=false;}}
+  else stopAutoUpdate();
+});
+
+// ── 시작 ──────────────────────────────────────────────
+openDB().then(()=>loadSaved()).catch(()=>loadSaved());
+</script>
+</body>
+</html>
