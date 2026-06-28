@@ -662,40 +662,51 @@ async function fetchPinUrls(boardUrl) {
   const token = getToken();
   if (!token) throw new Error('토큰이 없어. 🔑 토큰 버튼을 눌러 액세스 토큰을 입력해줘.');
 
-  // URL에서 username/board-slug 추출
   const m = boardUrl.match(/pinterest\.com\/([^\/]+)\/([^\/]+)/);
   if (!m) throw new Error('Pinterest 보드 URL 형식이 맞지 않아.');
-  const boardSlug = m[1] + '/' + m[2];
+  const slug = m[2].replace(/\/$/, '');
 
+  const hdrs = { Authorization: `Bearer ${token}` };
+
+  // 1) 유저 보드 목록에서 board_id 찾기
+  const boardsRes = await fetch(`${WORKER}/api/boards`, { headers: hdrs, signal: AbortSignal.timeout(10000) });
+  if (boardsRes.status === 401) throw new Error('토큰이 유효하지 않아. 🔑 토큰 버튼에서 다시 입력해줘.');
+  if (!boardsRes.ok) {
+    const d = await boardsRes.text();
+    throw new Error(`보드 목록 오류 ${boardsRes.status}: ${d}`);
+  }
+  const boardsJson = await boardsRes.json();
+  const board = (boardsJson.items || []).find(b => {
+    const bslug = (b.name || '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    return bslug === slug.toLowerCase() || b.id === slug;
+  });
+  if (!board) {
+    const names = (boardsJson.items || []).map(b => b.name).join(', ');
+    throw new Error(`보드를 찾을 수 없어. 내 보드 목록: ${names || '없음'}`);
+  }
+
+  // 2) board_id로 핀 가져오기
   const urls = [];
   let bookmark = null;
-
   do {
-    const qs = new URLSearchParams({ board: boardSlug, page_size: '50' });
+    const qs = new URLSearchParams({ board_id: board.id });
     if (bookmark) qs.set('bookmark', bookmark);
-    const res = await fetch(
-      `${WORKER}/api/pins?${qs}`,
-      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
-    );
-    if (res.status === 401) throw new Error('토큰이 유효하지 않아. 🔑 토큰 버튼에서 다시 입력해줘.');
+    const res = await fetch(`${WORKER}/api/pins?${qs}`, { headers: hdrs, signal: AbortSignal.timeout(10000) });
     if (!res.ok) {
-      let detail = '';
-      try { detail = (await res.json()).message || ''; } catch {}
-      throw new Error(`Pinterest API ${res.status}: ${detail || res.statusText}`);
+      const d = await res.text();
+      throw new Error(`핀 로드 오류 ${res.status}: ${d}`);
     }
     const json = await res.json();
-
     for (const pin of (json.items || [])) {
       const images = pin.media?.images;
       if (!images) continue;
-      // 가장 큰 해상도 선택
       const url = (images['1200x'] || images['736x'] || images['600x'] || Object.values(images)[0])?.url;
       if (url) urls.push(url);
     }
     bookmark = json.bookmark || null;
   } while (bookmark && urls.length < 500);
 
-  if (!urls.length) throw new Error('핀을 찾을 수 없어. 보드가 공개인지 확인해줘.');
+  if (!urls.length) throw new Error('핀을 찾을 수 없어.');
   return urls;
 }
 
