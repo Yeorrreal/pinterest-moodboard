@@ -671,14 +671,18 @@ async function fetchPinUrls(boardUrl) {
   let bookmark = null;
 
   do {
-    const qs = new URLSearchParams({ board: boardSlug, page_size: '100' });
+    const qs = new URLSearchParams({ board: boardSlug, page_size: '50' });
     if (bookmark) qs.set('bookmark', bookmark);
     const res = await fetch(
       `${WORKER}/api/pins?${qs}`,
       { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
     );
     if (res.status === 401) throw new Error('토큰이 유효하지 않아. 🔑 토큰 버튼에서 다시 입력해줘.');
-    if (!res.ok) throw new Error(`Pinterest API 오류 HTTP ${res.status}`);
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).message || ''; } catch {}
+      throw new Error(`Pinterest API ${res.status}: ${detail || res.statusText}`);
+    }
     const json = await res.json();
 
     for (const pin of (json.items || [])) {
