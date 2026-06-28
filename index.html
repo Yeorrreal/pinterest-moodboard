@@ -665,16 +665,16 @@ async function fetchPinUrls(boardUrl) {
   // URL에서 username/board-slug 추출
   const m = boardUrl.match(/pinterest\.com\/([^\/]+)\/([^\/]+)/);
   if (!m) throw new Error('Pinterest 보드 URL 형식이 맞지 않아.');
-  const boardId = encodeURIComponent(m[1] + '/' + m[2]);
+  const boardSlug = m[1] + '/' + m[2];
 
   const urls = [];
   let bookmark = null;
 
   do {
-    const qs = new URLSearchParams({ page_size: '100', fields: 'id,media' });
+    const qs = new URLSearchParams({ board: boardSlug, page_size: '100' });
     if (bookmark) qs.set('bookmark', bookmark);
     const res = await fetch(
-      `${WORKER}/api/boards/${boardId}/pins?${qs}`,
+      `${WORKER}/api/pins?${qs}`,
       { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
     );
     if (res.status === 401) throw new Error('토큰이 유효하지 않아. 🔑 토큰 버튼에서 다시 입력해줘.');
