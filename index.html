@@ -111,6 +111,31 @@ input[type="range"].stroke-range { width: 26px; writing-mode: vertical-lr; direc
 .spinner { width: 36px; height: 36px; border: 3px solid #e0e0e0; border-top-color: #e60023; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #loading-text { font-size: 13px; color: #999; }
+
+#token-modal-bg {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 2000;
+  align-items: center; justify-content: center;
+}
+#token-modal-bg.open { display: flex; }
+#token-modal {
+  background: white; border-radius: 12px; padding: 24px; width: 420px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+#token-modal h3 { font-size: 15px; margin-bottom: 6px; }
+#token-modal p  { font-size: 12px; color: #888; margin-bottom: 14px; line-height: 1.6; }
+#token-modal a  { color: #e60023; }
+#token-input-wrap { display: flex; gap: 8px; margin-bottom: 10px; }
+#token-input-wrap input {
+  flex: 1; height: 36px; border: 1px solid #ddd; border-radius: 6px;
+  padding: 0 10px; font-size: 13px; outline: none; font-family: monospace;
+}
+#token-input-wrap input:focus { border-color: #e60023; }
+#token-saved { font-size: 11px; color: #4caf50; margin-bottom: 10px; display: none; }
+#token-modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+#token-modal-btns button { height: 32px; padding: 0 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; }
+#btn-token-save { background: #e60023; color: white; }
+#btn-token-cancel { background: #f0f0f0; color: #333; }
+#btn-token-clear  { background: white; color: #999; border: 1px solid #ddd !important; }
 </style>
 </head>
 <body>
@@ -120,10 +145,31 @@ input[type="range"].stroke-range { width: 26px; writing-mode: vertical-lr; direc
   <button id="btn-load">불러오기</button>
   <button id="btn-clear">초기화</button>
   <button id="btn-export">PNG 저장</button>
+  <button id="btn-token" title="Pinterest 액세스 토큰 설정">🔑 토큰</button>
   <label id="auto-label"><input type="checkbox" id="btn-auto">자동 업데이트</label>
   <span id="next-update"></span>
   <span id="status"></span>
   <span id="save-indicator"></span>
+</div>
+
+<div id="token-modal-bg">
+  <div id="token-modal">
+    <h3>Pinterest 액세스 토큰</h3>
+    <p>
+      <a href="https://developers.pinterest.com/apps/" target="_blank">developers.pinterest.com/apps</a>에서<br>
+      앱 생성 → <b>Generate access token</b> 클릭 → 토큰 복사 후 입력.<br>
+      토큰은 이 기기의 localStorage에만 저장돼.
+    </p>
+    <div id="token-input-wrap">
+      <input type="password" id="token-input" placeholder="pina_xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" />
+    </div>
+    <div id="token-saved">✓ 저장됨</div>
+    <div id="token-modal-btns">
+      <button id="btn-token-clear">토큰 삭제</button>
+      <button id="btn-token-cancel">닫기</button>
+      <button id="btn-token-save">저장</button>
+    </div>
+  </div>
 </div>
 
 <div id="toolpanel">
@@ -154,12 +200,8 @@ input[type="range"].stroke-range { width: 26px; writing-mode: vertical-lr; direc
 <div id="loading-overlay"><div class="spinner"></div><p id="loading-text">로딩 중...</p></div>
 
 <script>
-// ── 설정: Cloudflare Worker URL ────────────────────────
-// 로컬 개발: 'http://127.0.0.1:8765/proxy'
-// GitHub Pages: 'https://your-worker.your-name.workers.dev/proxy'  ← 배포 후 교체
-const PROXY_BASE = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
-  ? 'http://127.0.0.1:8765/proxy'
-  : 'https://floral-meadow-2e40.yjrosie.workers.dev/proxy'; // ← 여기 교체
+// ── Pinterest API ──────────────────────────────────────
+function getToken() { return localStorage.getItem('pinterest-token') || ''; }
 
 // ── 상태 ──────────────────────────────────────────────
 let scale = 1, panX = 0, panY = 0;
@@ -615,27 +657,41 @@ function createPin(src, x, y, w=220, localId=null) {
 }
 
 // ── RSS ───────────────────────────────────────────────
-function parseRssXml(text) {
-  const xml = new DOMParser().parseFromString(text,'text/xml');
-  if (xml.querySelector('parsererror')) throw new Error('RSS 파싱 실패');
-  const items = xml.querySelectorAll('item');
-  if (!items.length) throw new Error('핀을 찾을 수 없어. 보드가 공개인지 확인해줘.');
-  const results = [];
-  for (const item of items) {
-    let url=null;
-    const media=item.querySelector('content');
-    if(media?.getAttribute('url')) url=media.getAttribute('url');
-    if(!url){const m=(item.querySelector('description')?.textContent||'').match(/<img[^>]+src=["']([^"']+)["']/i);if(m)url=m[1];}
-    if(!url){const enc=item.querySelector('enclosure');if(enc?.getAttribute('url'))url=enc.getAttribute('url');}
-    if(url) results.push(url.replace(/\/\d+x\//,'/736x/'));
-  }
-  return results;
-}
+async function fetchPinUrls(boardUrl) {
+  const token = getToken();
+  if (!token) throw new Error('토큰이 없어. 🔑 토큰 버튼을 눌러 액세스 토큰을 입력해줘.');
 
-async function fetchPinUrls(rssUrl) {
-  const res = await fetch(`${PROXY_BASE}?url=${encodeURIComponent(rssUrl)}`,{signal:AbortSignal.timeout(10000)});
-  if(!res.ok) throw new Error(`프록시 오류 HTTP ${res.status}`);
-  return parseRssXml(await res.text());
+  // URL에서 username/board-slug 추출
+  const m = boardUrl.match(/pinterest\.com\/([^\/]+)\/([^\/]+)/);
+  if (!m) throw new Error('Pinterest 보드 URL 형식이 맞지 않아.');
+  const boardId = encodeURIComponent(m[1] + '/' + m[2]);
+
+  const urls = [];
+  let bookmark = null;
+
+  do {
+    const qs = new URLSearchParams({ page_size: '100', fields: 'id,media' });
+    if (bookmark) qs.set('bookmark', bookmark);
+    const res = await fetch(
+      `https://api.pinterest.com/v5/boards/${boardId}/pins?${qs}`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
+    );
+    if (res.status === 401) throw new Error('토큰이 유효하지 않아. 🔑 토큰 버튼에서 다시 입력해줘.');
+    if (!res.ok) throw new Error(`Pinterest API 오류 HTTP ${res.status}`);
+    const json = await res.json();
+
+    for (const pin of (json.items || [])) {
+      const images = pin.media?.images;
+      if (!images) continue;
+      // 가장 큰 해상도 선택
+      const url = (images['1200x'] || images['736x'] || images['600x'] || Object.values(images)[0])?.url;
+      if (url) urls.push(url);
+    }
+    bookmark = json.bookmark || null;
+  } while (bookmark && urls.length < 500);
+
+  if (!urls.length) throw new Error('핀을 찾을 수 없어. 보드가 공개인지 확인해줘.');
+  return urls;
 }
 
 // ── 자동 업데이트 ─────────────────────────────────────
@@ -647,9 +703,9 @@ function startCountdown() {
 function stopCountdown(){clearInterval(countdownTimer);document.getElementById('next-update').textContent='';}
 
 async function refreshBoard() {
-  const rssUrl=buildRssUrl(); if(!rssUrl) return;
+  const boardUrl=buildBoardUrl(); if(!boardUrl) return;
   try {
-    const urls=await fetchPinUrls(rssUrl);
+    const urls=await fetchPinUrls(boardUrl);
     const newUrls=urls.filter(u=>!knownUrls.has(u));
     if(newUrls.length){newUrls.forEach((src,i)=>{knownUrls.add(src);createPin(src,40+i*240,40);});statusEl.textContent=`+${newUrls.length}개 추가됨`;hideHint();scheduleSave();}
     else statusEl.textContent='새 핀 없음';
@@ -657,20 +713,20 @@ async function refreshBoard() {
   if(document.getElementById('btn-auto').checked){startCountdown();autoTimer=setTimeout(refreshBoard,AUTO_INTERVAL*1000);}
 }
 
-function buildRssUrl(){
+function buildBoardUrl(){
   const raw=document.getElementById('url-input').value.trim(); if(!raw)return null;
-  return (raw.startsWith('http')?raw:'https://'+raw).replace(/\/$/,'')+'.rss';
+  return raw.startsWith('http')?raw:'https://'+raw;
 }
 function startAutoUpdate(){clearTimeout(autoTimer);startCountdown();autoTimer=setTimeout(refreshBoard,AUTO_INTERVAL*1000);}
 function stopAutoUpdate(){clearTimeout(autoTimer);stopCountdown();}
 
 async function loadBoard() {
-  const rssUrl=buildRssUrl(); if(!rssUrl) return;
+  const boardUrl=buildBoardUrl(); if(!boardUrl) return;
   document.getElementById('btn-load').disabled=true;
   loadingOverlay.classList.add('visible'); loadingText.textContent='RSS 피드 가져오는 중…';
   statusEl.textContent=''; stopAutoUpdate();
   try {
-    const urls=await fetchPinUrls(rssUrl);
+    const urls=await fetchPinUrls(boardUrl);
     loadingText.textContent=`${urls.length}개 핀 배치 중…`;
     clearBoard(false); knownUrls.clear();
     const COLS=5,CW=220,GAP=20;
@@ -741,6 +797,29 @@ document.getElementById('btn-auto').addEventListener('change',e=>{
   if(e.target.checked){if(knownUrls.size)startAutoUpdate();else{statusEl.textContent='먼저 보드를 불러와줘';e.target.checked=false;}}
   else stopAutoUpdate();
 });
+
+
+// ── 토큰 모달 ─────────────────────────────────────────
+const tokenModal = document.getElementById('token-modal-bg');
+
+document.getElementById('btn-token').addEventListener('click', () => {
+  document.getElementById('token-input').value = getToken();
+  document.getElementById('token-saved').style.display = 'none';
+  tokenModal.classList.add('open');
+});
+document.getElementById('btn-token-cancel').addEventListener('click', () => tokenModal.classList.remove('open'));
+document.getElementById('btn-token-save').addEventListener('click', () => {
+  const val = document.getElementById('token-input').value.trim();
+  if (val) { localStorage.setItem('pinterest-token', val); document.getElementById('token-saved').style.display = 'block'; setTimeout(()=>tokenModal.classList.remove('open'), 800); }
+});
+document.getElementById('btn-token-clear').addEventListener('click', () => {
+  localStorage.removeItem('pinterest-token');
+  document.getElementById('token-input').value = '';
+  document.getElementById('token-saved').style.display = 'none';
+});
+tokenModal.addEventListener('click', e => { if (e.target === tokenModal) tokenModal.classList.remove('open'); });
+// 토큰 없으면 시작 시 모달 자동 오픈
+if (!getToken()) setTimeout(() => tokenModal.classList.add('open'), 500);
 
 // ── 시작 ──────────────────────────────────────────────
 openDB().then(()=>loadSaved()).catch(()=>loadSaved());
